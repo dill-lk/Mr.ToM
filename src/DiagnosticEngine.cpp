@@ -77,7 +77,7 @@ void ExpertSwapper::unload_current_expert() {
         impl_->ctx = nullptr;
     }
     if (impl_->model != nullptr) {
-        llama_free_model(impl_->model);
+        llama_model_free(impl_->model);
         impl_->model = nullptr;
     }
 #endif
@@ -94,7 +94,7 @@ bool ExpertSwapper::load_expert_model(const std::string& model_path, const int n
 
 #if RMOE_HAS_LLAMA
     llama_model_params model_params = llama_model_default_params();
-    impl_->model = llama_load_model_from_file(model_path.c_str(), model_params);
+    impl_->model = llama_model_load_from_file(model_path.c_str(), model_params);
     if (impl_->model == nullptr) {
         std::cerr << "[llama.cpp] Failed loading model: " << model_path << '\n';
         impl_.reset();
@@ -106,10 +106,10 @@ bool ExpertSwapper::load_expert_model(const std::string& model_path, const int n
     ctx_params.n_threads = 4;
     ctx_params.n_threads_batch = 4;
 
-    impl_->ctx = llama_new_context_with_model(impl_->model, ctx_params);
+    impl_->ctx = llama_init_from_model(impl_->model, ctx_params);
     if (impl_->ctx == nullptr) {
         std::cerr << "[llama.cpp] Failed creating context for: " << model_path << '\n';
-        llama_free_model(impl_->model);
+        llama_model_free(impl_->model);
         impl_.reset();
         return false;
     }
@@ -164,10 +164,11 @@ std::string ExpertSwapper::infer_text(const std::string& prompt, const int max_n
     }
 
     std::string output;
+    llama_sampler* smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
     for (int i = 0; i < max_new_tokens; ++i) {
-        const float* logits = llama_get_logits_ith(impl_->ctx, batch.n_tokens - 1);
-        const llama_token next = llama_sampler_sample_token_greedy(logits, llama_vocab_n_tokens(vocab));
-        if (next == llama_token_eos(vocab)) {
+        const llama_token next = llama_sampler_sample(smpl, impl_->ctx, batch.n_tokens - 1);
+        if (next == llama_vocab_eos(vocab)) {
             break;
         }
 
@@ -189,6 +190,7 @@ std::string ExpertSwapper::infer_text(const std::string& prompt, const int max_n
         }
     }
 
+    llama_sampler_free(smpl);
     llama_batch_free(batch);
     return output.empty() ? std::string("[inference-warning] empty output") : output;
 #else
