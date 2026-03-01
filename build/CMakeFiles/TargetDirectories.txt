@@ -1,3 +1,0 @@
-/content/Mr.ToM/build/Mr.ToM/build/CMakeFiles/rmoe_engine.dir
-/content/Mr.ToM/build/Mr.ToM/build/CMakeFiles/edit_cache.dir
-/content/Mr.ToM/build/Mr.ToM/build/CMakeFiles/rebuild_cache.dir
