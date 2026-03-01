@@ -2,6 +2,8 @@ name: Build and Release R-MoE
 
 on:
   push:
+    branches:
+      - "**"
     tags:
       - "v*" # උදා: v0.91, v1.0.0 වගේ tag එකක් push කරපු ගමන් වැඩේ පටන් ගන්නවා
 
@@ -45,6 +47,7 @@ jobs:
           }
 
       - name: Auto-Release by GitHub Bot
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
