@@ -1,9 +1,15 @@
-# R-MoE Python Engine — runtime dependencies
-# ===========================================
-# Install in Google Colab (GPU build with CUDA):
-#   !CMAKE_ARGS="-DGGML_CUDA=ON" pip install llama-cpp-python
+# R-MoE v2.0 Python Engine — runtime dependencies
+# =================================================
 #
-# CPU-only install (development / testing):
+# Google Colab (GPU build — pre-built CUDA wheel, ~60 s install):
+#   pip install llama-cpp-python \
+#     --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121 \
+#     --upgrade
+#
+# CPU-only (development / offline testing):
 #   pip install -r requirements.txt
+#
+# Note: all other rmoe/ modules use only the Python standard library.
+# No PyTorch, no transformers, no extra embeddings model required.
 
-llama-cpp-python>=0.2.72
+llama-cpp-python>=0.2.90
