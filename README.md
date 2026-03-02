@@ -6,7 +6,7 @@
 
 [![Tests](https://img.shields.io/badge/tests-119%20passing-brightgreen)](#tests)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](#requirements)
-[![License](https://img.shields.io/badge/license-MIT-green)](#license)
+[![License](https://img.shields.io/badge/license-Apache-green)](#license)
 [![Paper](https://img.shields.io/badge/paper-LaTeX-orange)](paper/rmoe_paper.tex)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dill-lk/R-MoE-for-Clinical-Diagnostics/blob/main/RUN.ipynb)
 
@@ -22,25 +22,25 @@ the dual-process cognitive workflow of human radiologists:
 
 ```mermaid
 flowchart TD
-    INPUT(["📥 DICOM / PNG Input\n+ Clinical Notes"]):::input
+    INPUT["📥 DICOM / PNG Input<br/>+ Clinical Notes"]:::input
 
-    DOCTOR_UPLOAD(["👨‍⚕️ Doctor Upload /\nZoom Command"]):::hitl
+    DOCTOR_UPLOAD["👨‍⚕️ Doctor Upload /<br/>Zoom Command"]:::hitl
 
-    MPE["🔬 Phase 1 · MPE — Perception\nMoondream2 / Qwen2-VL\n─────────────────────\n• Dynamic Resolution Adaptation\n• Visual Token Merger\n• Saliency-Aware Crop\n• DICOM Windowing\n• MCV Builder"]:::phase
+    MPE["🔬 Phase 1 · MPE — Perception<br/>Moondream2 / Qwen2-VL<br/>─────────────────────<br/>• Dynamic Resolution Adaptation<br/>• Visual Token Merger<br/>• Saliency-Aware Crop<br/>• DICOM Windowing<br/>• MCV Builder"]:::phase
 
-    ARLL["🧠 Phase 2 · ARLL — Reasoning\nDeepSeek-R1-Distill\n─────────────────────\n• Chain-of-Thought (CoT)\n• DDx Ensemble  Sc = 1−σ²\n• Vector RAG (BM25)\n• Cognitive Bias Detector\n• Temporal Comparator"]:::phase
+    ARLL["🧠 Phase 2 · ARLL — Reasoning<br/>DeepSeek-R1-Distill<br/>─────────────────────<br/>• Chain-of-Thought (CoT)<br/>• DDx Ensemble  Sc = 1−σ²<br/>• Vector RAG (BM25)<br/>• Cognitive Bias Detector<br/>• Temporal Comparator"]:::phase
 
-    DOCTOR_QUERY(["👨‍⚕️ Doctor Query\n'Explain this'"]):::hitl
+    DOCTOR_QUERY["👨‍⚕️ Doctor Query<br/>'Explain this'"]:::hitl
 
     GATE{"Sc ≥ 0.90?"}:::gate
 
-    CSR["📋 Phase 3 · CSR — Clinical Synthesis\nMedGemma-2B\n─────────────────────\n• ICD-11 / SNOMED CT\n• TIRADS / BI-RADS / Lung-RADS\n• Dual-Layer Safety Validator\n• HITL Radiologist Flag"]:::phase
+    CSR["📋 Phase 3 · CSR — Clinical Synthesis<br/>MedGemma-2B<br/>─────────────────────<br/>• ICD-11 / SNOMED CT<br/>• TIRADS / BI-RADS / Lung-RADS<br/>• Dual-Layer Safety Validator<br/>• HITL Radiologist Flag"]:::phase
 
-    WANNA["🔁 #35;wanna#35; Protocol\nmax 3 iterations\n─────────────────────\n1. High-Res Crop\n2. Alternate View\n3. Modality Escalation\n   CXR→CT→MRI→PET-CT"]:::loop
+    WANNA["🔁 Wanna Protocol<br/>max 3 iterations<br/>─────────────────────<br/>1. High-Res Crop<br/>2. Alternate View<br/>3. Modality Escalation<br/>CXR→CT→MRI→PET-CT"]:::loop
 
-    ESCALATE(["🚨 Escalate to Human\nif still uncertain"]):::escalate
+    ESCALATE["🚨 Escalate to Human<br/>if still uncertain"]:::escalate
 
-    REPORT(["📄 Final Report\n+ Audit Trail\n+ Session Report"]):::output
+    REPORT["📄 Final Report<br/>+ Audit Trail<br/>+ Session Report"]:::output
 
     INPUT --> MPE
     DOCTOR_UPLOAD -->|feedback| MPE
