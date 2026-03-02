@@ -91,6 +91,11 @@ _NON_CLINICAL_SUBSTRINGS = (
     "iteration", "phase ", "protocol",
     "metric", "wanna", "shows a primary",
     "it seems", "attn score", " roi ",
+    # Additional patterns produced when the model outputs reasoning prose
+    # instead of a medical condition name (e.g. attention-map references,
+    # pipeline component names, or probability-related sentences).
+    "attention map", " attn ", "arll", " probability",
+    "how to", "the model", "approach this",
 )
 
 # Minimum character length for a string to be considered a medical diagnosis.
@@ -98,10 +103,21 @@ _MIN_DIAGNOSIS_LENGTH = 4
 
 
 def _is_clinical_hypothesis(name: str) -> bool:
-    """Return True only if *name* looks like a real medical diagnosis."""
-    if len(name.strip()) < _MIN_DIAGNOSIS_LENGTH:
+    """Return True only if *name* looks like a real medical diagnosis.
+
+    Medical condition names (e.g. "Rib fracture", "Pulmonary adenocarcinoma")
+    always start with an uppercase letter.  Strings that start with a lowercase
+    letter are partial sentences captured by the regex fallback and must be
+    rejected.
+    """
+    stripped = name.strip()
+    if len(stripped) < _MIN_DIAGNOSIS_LENGTH:
         return False
-    low = name.lower()
+    # All legitimate medical diagnoses start with an uppercase letter.
+    # Lowercase-initial strings are regex-captured sentence fragments.
+    if not stripped[0].isupper():
+        return False
+    low = stripped.lower()
     return not any(s in low for s in _NON_CLINICAL_SUBSTRINGS)
 
 

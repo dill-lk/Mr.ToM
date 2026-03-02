@@ -65,8 +65,8 @@ try:
         print_banner, print_run_summary, print_clinical_report,
     )
     from rmoe.ui import (
-        BOLD, CYAN, DIM, GREEN, MAGENTA, RED, RESET, YELLOW, WHITE,
-        _rule, _kv,
+        BOLD, DIM, GREEN, RED, RESET, YELLOW,
+        _rule,
     )
     from rmoe.charts import (
         sc_progression_chart, ddx_evolution_chart, uncertainty_heatmap,
@@ -175,7 +175,7 @@ def main(argv=None) -> int:
         from rmoe.eval import BenchmarkRunner, BenchmarkDataset
         if not args.quiet:
             print_banner()
-        print(f"\n  Loading benchmark dataset …")
+        print("\n  Loading benchmark dataset …")
         dataset = BenchmarkDataset(args.benchmark_dataset)
 
         sm      = WannaStateMachine(hard_limit=args.max_iter or 3,
