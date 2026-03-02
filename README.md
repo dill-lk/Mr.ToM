@@ -7,7 +7,7 @@
 [![Tests](https://img.shields.io/badge/tests-119%20passing-brightgreen)](#tests)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](#requirements)
 [![License](https://img.shields.io/badge/license-Apache-green)](#license)
-[![Paper](https://img.shields.io/badge/paper-LaTeX-orange)](paper/rmoe_paper.tex)
+[![Paper](https://img.shields.io/badge/paper-PDF-orange)](paper/R_MoE.pdf)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dill-lk/R-MoE-for-Clinical-Diagnostics/blob/main/RUN.ipynb)
 
 </div>
@@ -240,16 +240,8 @@ docs/               ARCHITECTURE.md · COLLAB_GUIDE.md
 
 ## Paper
 
-Full LaTeX manuscript: [`paper/rmoe_paper.tex`](paper/rmoe_paper.tex)
+Full paper PDF: [`paper/R_MoE.pdf`](paper/R_MoE.pdf)
 
-Compile:
-```bash
-cd paper && pdflatex rmoe_paper.tex && bibtex rmoe_paper && pdflatex rmoe_paper.tex
-```
-
-Key results: F1=0.92 · ECE=0.08 · 25% FPR reduction · 15% recursion rate · 18% temporal improvement
-
----
 
 ## Requirements
 
