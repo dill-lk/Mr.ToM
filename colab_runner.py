@@ -166,15 +166,15 @@ def install_dependencies(force: bool = False) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def setup_repo(branch: str = "main") -> bool:
-    """Clone or update the Mr.ToM repository."""
+    """Clone or update the R-MoE repository."""
     if os.path.isdir(os.path.join(REPO_DIR, "rmoe")):
         print(f"✅ Repo already present at {REPO_DIR}")
         return True
-    print("📥 Cloning Mr.ToM …")
+    print("📥 Cloning R-MoE for Clinical Diagnostics …")
     ret = subprocess.run(
         ["git", "clone", "--depth=1",
          f"--branch={branch}",
-         "https://github.com/dill-lk/Mr.ToM.git",
+         "https://github.com/dill-lk/R-MoE-for-Clinical-Diagnostics.git",
          REPO_DIR],
     )
     if ret.returncode != 0:

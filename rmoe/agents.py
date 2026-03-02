@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import sys
@@ -30,17 +31,22 @@ try:
     from llama_cpp import Llama  # type: ignore[import-untyped]
     try:
         from llama_cpp.llama_chat_format import (  # type: ignore[import-untyped]
-            Qwen2VLChatHandler as _VisionChatHandler,
+            MoondreamChatHandler as _VisionChatHandler,
         )
     except ImportError:
         try:
             from llama_cpp.llama_chat_format import (  # type: ignore[import-untyped]
-                MoondreamChatHandler as _VisionChatHandler,
+                Llava15ChatHandler as _VisionChatHandler,
             )
         except ImportError:
-            from llama_cpp.llama_chat_format import (  # type: ignore[import-untyped]
-                Qwen2VLChatAdapter as _VisionChatHandler,
-            )
+            try:
+                from llama_cpp.llama_chat_format import (  # type: ignore[import-untyped]
+                    Qwen2VLChatHandler as _VisionChatHandler,
+                )
+            except ImportError:
+                from llama_cpp.llama_chat_format import (  # type: ignore[import-untyped]
+                    Qwen2VLChatAdapter as _VisionChatHandler,
+                )
     _HAS_LLAMA_CPP = True
 except ImportError:
     _HAS_LLAMA_CPP = False
@@ -378,7 +384,32 @@ class ExpertSwapper:
             )
             return resp["choices"][0]["message"].get("content") or ""
         except Exception as exc:
-            import logging
+            # Moondream2 (and some other vision models) do not support the
+            # system role.  Retry with the system prompt merged into the user
+            # message so the image is still included in the request.
+            if "system role not supported" in str(exc).lower():
+                try:
+                    resp = self._llm.create_chat_completion(
+                        messages=[
+                            {"role": "user", "content": [
+                                {"type": "text",
+                                 "text": f"{system_prompt}\n\n{user_text}"},
+                                {"type": "image_url",
+                                 "image_url": {"url": uri}},
+                            ]},
+                        ],
+                        max_tokens=n_gen,
+                        temperature=self._params.temperature,
+                        top_k=self._params.top_k,
+                        top_p=self._params.top_p,
+                        repeat_penalty=self._params.repeat_penalty,
+                    )
+                    return resp["choices"][0]["message"].get("content") or ""
+                except Exception as exc2:
+                    logging.getLogger("rmoe").warning(
+                        "Image inference retry failed (%s).", exc2
+                    )
+                    return self.infer_text(system_prompt, user_text, max_new_tokens)
             logging.getLogger("rmoe").warning("Image inference failed (%s).", exc)
             return self.infer_text(system_prompt, user_text, max_new_tokens)
 
