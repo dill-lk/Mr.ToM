@@ -1,0 +1,9 @@
+# R-MoE Python Engine — runtime dependencies
+# ===========================================
+# Install in Google Colab (GPU build with CUDA):
+#   !CMAKE_ARGS="-DGGML_CUDA=ON" pip install llama-cpp-python
+#
+# CPU-only install (development / testing):
+#   pip install -r requirements.txt
+
+llama-cpp-python>=0.2.72
