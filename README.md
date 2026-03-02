@@ -36,7 +36,7 @@ flowchart TD
 
     CSR["📋 Phase 3 · CSR — Clinical Synthesis\nMedGemma-2B\n─────────────────────\n• ICD-11 / SNOMED CT\n• TIRADS / BI-RADS / Lung-RADS\n• Dual-Layer Safety Validator\n• HITL Radiologist Flag"]:::phase
 
-    WANNA["🔁 #wanna# Protocol\nmax 3 iterations\n─────────────────────\n1. High-Res Crop\n2. Alternate View\n3. Modality Escalation\n   CXR→CT→MRI→PET-CT"]:::loop
+    WANNA["🔁 #35;wanna#35; Protocol\nmax 3 iterations\n─────────────────────\n1. High-Res Crop\n2. Alternate View\n3. Modality Escalation\n   CXR→CT→MRI→PET-CT"]:::loop
 
     ESCALATE(["🚨 Escalate to Human\nif still uncertain"]):::escalate
 
@@ -75,22 +75,22 @@ flowchart TD
 
 ---
 
-## Google Drive Layout (required before running)
+## 📂 Model Files (downloaded automatically)
 
-All model files live in one folder in your Drive.
-**The filenames must match exactly:**
+All model files are available in a public shared Drive folder —
+**no Google Drive account required.**  Cell 1 of `RUN.ipynb` downloads
+everything automatically:
 
 ```
-MyDrive/
-└── Medical_MoE_Models/
+/content/models/                       ← downloaded by Cell 1 via gdown
     ├── vision_proj.gguf        ← CLIP mmproj (companion to vision_text)
     ├── vision_text.gguf        ← Moondream2-2B vision backbone
     ├── reasoning_expert.gguf   ← DeepSeek-R1-Distill-Qwen-1.5B reasoning
     ├── clinical_expert.gguf    ← MedGemma-2B-it clinical synthesis
-    └── test_patient.png        ← Your patient scan (chest X-ray / CT slice)
+    └── test_patient.png        ← Sample patient scan (chest X-ray)
 ```
 
-**Download all files from:**
+**Public shared folder:**
 [https://drive.google.com/drive/folders/1NbTL4BFFrySVmFt05wEh-B1q3mqLE3C5](https://drive.google.com/drive/folders/1NbTL4BFFrySVmFt05wEh-B1q3mqLE3C5)
 
 ---
@@ -124,11 +124,10 @@ python engine.py --image test_patient.png
 Open **[RUN.ipynb](RUN.ipynb)** in Google Colab and run cells in order — see [RUN.md](RUN.md) for the full written guide.
 
 ```python
-# Cell 4 — stage models from Drive
-from colab_runner import setup_environment
-setup_environment()
+# Cell 1 — download model files (no Drive account needed)
+# (runs automatically via gdown in RUN.ipynb Cell 1)
 
-# Cell 5 — run full diagnosis
+# Cell 6 — run full diagnosis
 from colab_runner import run_python_engine
 run_python_engine(image="/content/models/test_patient.png", eval_mode=True, charts=True)
 ```

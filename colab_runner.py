@@ -2,16 +2,18 @@
 colab_runner.py — Google Colab launcher for R-MoE v2.0.
 
 Run each numbered cell in order inside a Colab notebook.
-See RUN.md for the complete guide with model download links.
+See RUN.md for the complete guide.
 
-Expected Drive layout:
-    MyDrive/
-    └── Medical_MoE_Models/
-        ├── vision_text.gguf        ← Moondream2-2B (moondream-2b-int8.gguf)
-        ├── vision_proj.gguf        ← CLIP mmproj companion file
-        ├── reasoning_expert.gguf   ← DeepSeek-R1-Distill-Qwen-1.5B-Q8_0.gguf
-        ├── clinical_expert.gguf    ← MedGemma-2B-it-Q8_0.gguf
-        └── test_patient.png        ← Patient image for diagnosis
+Cell 1 of RUN.ipynb downloads all model files automatically from the public
+shared Drive folder (no Google Drive account required):
+    https://drive.google.com/drive/folders/1NbTL4BFFrySVmFt05wEh-B1q3mqLE3C5
+
+Files are saved to /content/models/:
+    ├── vision_text.gguf        ← Moondream2-2B vision backbone
+    ├── vision_proj.gguf        ← CLIP mmproj companion file
+    ├── reasoning_expert.gguf   ← DeepSeek-R1-Distill-Qwen-1.5B-Q8_0
+    ├── clinical_expert.gguf    ← MedGemma-2B-it-Q8_0
+    └── test_patient.png        ← Sample patient image for diagnosis
 """
 from __future__ import annotations
 
@@ -27,10 +29,11 @@ try:
 except ImportError:
     _upload_patient_image = None  # type: ignore[assignment]
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# ── Paths & URLs ──────────────────────────────────────────────────────────────
 DRIVE_DIR        = "/content/drive/MyDrive/Medical_MoE_Models"
 LOCAL_MODELS_DIR = "/content/models"
 REPO_DIR         = "/content/Mr.ToM"
+FOLDER_URL       = "https://drive.google.com/drive/folders/1NbTL4BFFrySVmFt05wEh-B1q3mqLE3C5"
 
 _MODEL_FILES = [
     "vision_text.gguf",
@@ -42,7 +45,60 @@ _MODEL_FILES = [
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Cell 1 — Mount Google Drive
+#  Cell 1 — Download model files from public shared Drive folder
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def download_models(force: bool = False) -> bool:
+    """
+    Download model files from the public shared Drive folder into LOCAL_MODELS_DIR.
+
+    Uses gdown — no Google Drive account required.  Skips files that are
+    already present unless ``force=True``.
+    """
+    _gguf_files = [f for f in _MODEL_FILES if f.endswith(".gguf")]
+    if not force and all(
+        os.path.exists(os.path.join(LOCAL_MODELS_DIR, f)) for f in _gguf_files
+    ):
+        print(f"✅ Model files already present at {LOCAL_MODELS_DIR}")
+        return True
+
+    try:
+        import gdown  # type: ignore[import-untyped]
+    except ImportError:
+        print("📦 Installing gdown …")
+        ret = subprocess.run("pip install gdown --quiet", shell=True)
+        if ret.returncode != 0:
+            print("❌ gdown installation failed.")
+            return False
+        import gdown  # type: ignore[import-untyped]
+
+    os.makedirs(LOCAL_MODELS_DIR, exist_ok=True)
+    print("📥 Downloading model files from public shared Drive folder…")
+    print("   This may take several minutes depending on your connection speed.\n")
+    try:
+        gdown.download_folder(
+            FOLDER_URL, output=LOCAL_MODELS_DIR, quiet=False, use_cookies=False
+        )
+    except Exception as exc:
+        print(f"❌ Download failed: {exc}")
+        return False
+
+    missing = [
+        f for f in _MODEL_FILES
+        if not os.path.exists(os.path.join(LOCAL_MODELS_DIR, f))
+    ]
+    if missing:
+        print(f"\n⚠️  Still missing: {missing}")
+        print(f"   Re-run this function, or download manually from:\n   {FOLDER_URL}")
+        return False
+
+    print(f"\n✅ All model files ready at {LOCAL_MODELS_DIR}")
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Legacy — Mount Google Drive  (optional — only needed if you store your own
+#            model files in Drive instead of using download_models())
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def mount_drive() -> bool:
@@ -64,7 +120,7 @@ def mount_drive() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Cell 2 — Install llama-cpp-python (CUDA wheel)
+#  Cell 3 — Install llama-cpp-python (CUDA wheel)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def install_dependencies(force: bool = False) -> bool:
@@ -106,7 +162,7 @@ def install_dependencies(force: bool = False) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Cell 3 — Clone / update repository
+#  Cell 2 — Clone / update repository
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def setup_repo(branch: str = "main") -> bool:
@@ -129,7 +185,8 @@ def setup_repo(branch: str = "main") -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Cell 4 — Stage model files from Drive
+#  Legacy — Stage model files from Drive  (optional — use setup_environment()
+#            only if you have your own model files in Google Drive)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def setup_environment() -> bool:
@@ -179,7 +236,7 @@ def setup_environment() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Cell 5 — Run Python engine
+#  Cell 6 — Run Python engine
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def run_python_engine(
@@ -213,9 +270,12 @@ def run_python_engine(
         quiet:          Suppress banner and HITL prompts.
         session_report: Write full text session report to this path.
     """
-    if not setup_environment():
-        print("🛑 Setup failed — check that all model files are on Drive.")
-        return
+    # Models already staged by download_models() — skip Drive copy step if so
+    _gguf_files = [f for f in _MODEL_FILES if f.endswith(".gguf")]
+    if not all(os.path.exists(os.path.join(LOCAL_MODELS_DIR, f)) for f in _gguf_files):
+        if not setup_environment():
+            print("🛑 Setup failed — check that all model files are on Drive or run Cell 1 to download them.")
+            return
 
     if REPO_DIR not in sys.path:
         sys.path.insert(0, REPO_DIR)
@@ -298,7 +358,7 @@ def quick_benchmark() -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    mount_drive()
+    download_models()
     install_dependencies()
     setup_repo()
     run_python_engine(eval_mode=True, charts=True)

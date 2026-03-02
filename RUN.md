@@ -5,33 +5,27 @@
 
 ---
 
-## 📁 Drive Setup (one-time)
+## 🚀 Quick Start — run all cells top to bottom
 
-Create this folder structure in your Google Drive **before** running any cell:
+**No Google Drive account needed.** Cell 1 downloads every model file automatically
+from the public shared folder:
 
-```
-MyDrive/
-└── Medical_MoE_Models/
-    ├── vision_text.gguf        ← Moondream2 vision backbone
-    ├── vision_proj.gguf        ← CLIP mmproj file (same release as vision_text)
-    ├── reasoning_expert.gguf   ← DeepSeek-R1-Distill reasoning model
-    ├── clinical_expert.gguf    ← MedGemma-2B clinical synthesis model
-    └── test_patient.png        ← Your patient chest X-ray / scan
-```
+> 📂 https://drive.google.com/drive/folders/1NbTL4BFFrySVmFt05wEh-B1q3mqLE3C5
+
+Files are saved to `/content/models/` on the Colab instance SSD.
 
 ---
 
 ## 🤖 Recommended Models for T4 GPU (16 GB VRAM)
 
 > All models run **one at a time** via `ExpertSwapper` — peak VRAM usage < 4 GB per phase.
-> you can use and copy our models below from Drive also https://drive.google.com/drive/folders/1NbTL4BFFrySVmFt05wEh-B1q3mqLE3C5
 
-| Role | Model | File to rename | Size | Download |
-|------|-------|----------------|------|----------|
-| **Vision MPE** | Moondream2 2B int8 | `vision_text.gguf` | ~2.5 GB | [Hugging Face ↗](https://huggingface.co/vikhyatk/moondream2) |
-| **Vision CLIP** | Moondream2 mmproj | `vision_proj.gguf` | ~400 MB | Same release as above |
-| **Reasoning ARLL** | DeepSeek-R1-Distill-Qwen-1.5B Q8 | `reasoning_expert.gguf` | ~1.8 GB | [Hugging Face ↗](https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF) |
-| **Clinical CSR** | MedGemma-2B-it Q8 | `clinical_expert.gguf` | ~2.2 GB | [Hugging Face ↗](https://huggingface.co/google/medgemma-2b-it) |
+| Role | Model | Filename | Size |
+|------|-------|----------|------|
+| **Vision MPE** | Moondream2 2B int8 | `vision_text.gguf` | ~2.5 GB |
+| **Vision CLIP** | Moondream2 mmproj | `vision_proj.gguf` | ~400 MB |
+| **Reasoning ARLL** | DeepSeek-R1-Distill-Qwen-1.5B Q8 | `reasoning_expert.gguf` | ~1.8 GB |
+| **Clinical CSR** | MedGemma-2B-it Q8 | `clinical_expert.gguf` | ~2.2 GB |
 
 > **Alternatives (if above are unavailable):**
 > - Reasoning: `DeepSeek-R1-Distill-Llama-8B-Q4_K_M.gguf` (~5 GB, higher quality)
@@ -42,10 +36,23 @@ MyDrive/
 
 ## 🚀 Cell-by-Cell Colab Instructions
 
-### Cell 1 — Mount Google Drive
+### Cell 1 — Download Model Files (from public shared Drive folder)
 ```python
-from google.colab import drive
-drive.mount('/content/drive')
+import os
+
+# Install gdown (already available on Colab, pinned here for local runs)
+!pip install gdown --quiet
+
+import gdown
+
+MODELS_DIR = "/content/models"
+FOLDER_URL = "https://drive.google.com/drive/folders/1NbTL4BFFrySVmFt05wEh-B1q3mqLE3C5"
+
+os.makedirs(MODELS_DIR, exist_ok=True)
+print("📥 Downloading model files from public shared Drive folder…")
+print("   This may take several minutes depending on your connection speed.\n")
+
+gdown.download_folder(FOLDER_URL, output=MODELS_DIR, quiet=False, use_cookies=False)
 ```
 
 ### Cell 2 — Clone Repository
@@ -76,12 +83,28 @@ result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total',
 print("GPU:", result.stdout.strip())
 ```
 
-### Cell 4 — Stage Models from Drive → /content/models
+### Cell 4 — Verify Models & Set Up Paths
 ```python
-import sys
-sys.path.insert(0, '/content/Mr.ToM')
-from colab_runner import setup_environment
-setup_environment()
+import sys, os
+
+MODELS_DIR = "/content/models"
+REPO_DIR   = "/content/Mr.ToM"
+
+if REPO_DIR not in sys.path:
+    sys.path.insert(0, REPO_DIR)
+
+_expected = [
+    "vision_text.gguf",
+    "vision_proj.gguf",
+    "reasoning_expert.gguf",
+    "clinical_expert.gguf",
+]
+_missing = [f for f in _expected if not os.path.exists(os.path.join(MODELS_DIR, f))]
+if _missing:
+    print("⚠️  Missing model files:", _missing)
+    print("   Re-run Cell 1 to download them.")
+else:
+    print("✅ All model files verified at", MODELS_DIR)
 ```
 
 ### Cell 5 — Upload Patient Image
@@ -89,7 +112,12 @@ setup_environment()
 > **New in v2.0** — The pipeline now asks for the patient scan before it starts.
 > Run this cell to upload any PNG, JPEG, or DICOM file directly from your computer.
 > The image is saved to `/content/models/` and passed automatically to the engine.
-> Skip this cell only if `test_patient.png` is already on your Drive.
+> Skip this cell if you want to use the sample `test_patient.png` downloaded in Cell 1.
+
+> **Alternatively**, to use the included sample scan, skip this cell and set in Cell 6:
+> ```python
+> image_path = "/content/models/test_patient.png"
+> ```
 
 ```python
 import sys
@@ -102,12 +130,6 @@ from image_handler import upload_patient_image
 image_path = upload_patient_image()
 print("Image ready:", image_path)
 ```
-
-> **Alternatively**, if your scan is already on Google Drive you can skip this
-> cell and pass the path directly in Cell 6:
-> ```python
-> image_path = "/content/models/test_patient.png"
-> ```
 
 ---
 
@@ -236,7 +258,7 @@ INPUT (image + clinical notes)
           │               │
           └───────────────▼
                     FINAL REPORT
-               + HITL Radiologist Flag
+                + HITL Radiologist Flag
 ```
 
 ---
@@ -279,7 +301,7 @@ rmoe/
 
 | Problem | Solution |
 |---------|----------|
-| `❌ Drive folder not found` | Run Cell 1 (mount Drive) before Cell 4 |
+| `⚠️  Still missing` after Cell 1 | Re-run Cell 1; check your internet connection or download manually from the shared Drive link |
 | `llama_cpp not found` | Re-run Cell 3; check `!pip show llama-cpp-python` |
 | CUDA out of memory | Reduce `n_ctx` in `settings/rmoe_settings.json` to 1024 |
 | Model not found | Check file names exactly match the table above |
