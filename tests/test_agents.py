@@ -173,3 +173,111 @@ class TestParseArllOutput:
         names = [h.diagnosis for h in out.ensemble.hypotheses]
         assert "with probability" not in names
         assert "Rib fracture" in names
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  _parse_mpe_evidence  —  natural language fallback must not truncate
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestParseMpeEvidence:
+    """_parse_mpe_evidence must preserve the full model output in feature_summary
+    when the model outputs natural language instead of JSON."""
+
+    def test_valid_json_parsed(self):
+        """Clean JSON block is parsed into proper PerceptionEvidence fields."""
+        from rmoe.agents import _parse_mpe_evidence
+        raw = json.dumps({
+            "rois": [{"label": "LUL opacity", "suspicion": "high"}],
+            "feature_summary": "Spiculated left upper lobe opacity.",
+            "confidence_level": "high",
+            "saliency_crop": "120,60,380,280",
+        })
+        ev = _parse_mpe_evidence(raw)
+        assert ev.feature_summary == "Spiculated left upper lobe opacity."
+        assert ev.confidence_level == "high"
+        assert ev.saliency_crop == "120,60,380,280"
+        assert len(ev.rois) == 1
+
+    def test_natural_language_fallback_preserves_full_text(self):
+        """When the model outputs prose, feature_summary must equal the full
+        raw string — the old code truncated at 300 chars which silently
+        discarded most of what the vision model said."""
+        from rmoe.agents import _parse_mpe_evidence
+        # Generate a long natural-language description (> 300 chars, the old truncation limit)
+        long_output = (
+            "I can see a PA chest radiograph. There is an ill-defined opacity "
+            "in the left upper lobe with irregular, spiculated margins. "
+            "The lesion measures approximately 3.2 by 2.8 centimetres. "
+            "The mediastinum is not widened. No pleural effusion is visible. "
+            "The cardiac silhouette is within normal limits. "
+            "The right lung fields appear clear. "
+            "No pneumothorax is identified on this projection."
+        )
+        assert len(long_output) > 300, "test prerequisite: output must exceed the old 300-char truncation limit"
+        ev = _parse_mpe_evidence(long_output)
+        assert ev.feature_summary == long_output
+        assert ev.raw_summary == long_output
+
+    def test_natural_language_fallback_defaults(self):
+        """Fallback PerceptionEvidence has empty rois and medium confidence."""
+        from rmoe.agents import _parse_mpe_evidence
+        ev = _parse_mpe_evidence("Some free-form text from the vision model.")
+        assert ev.rois == []
+        assert ev.confidence_level == "medium"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MCVBuilder  —  feature_summary attribute fix
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMCVBuilderAttributeFix:
+    """MCVBuilder.build() must use evidence.feature_summary (not .summary)."""
+
+    def test_evidence_text_populated_from_feature_summary(self):
+        """MCVBuilder must read feature_summary from PerceptionEvidence and
+        use it for region-feature extraction and token budget estimation."""
+        from rmoe.mcv import MCVBuilder
+        from rmoe.models import PerceptionEvidence
+
+        evidence = PerceptionEvidence(
+            feature_summary=(
+                "Left upper lobe opacity with irregular margin. "
+                "Mediastinum widened. Pleural effusion noted in right lower zone."
+            ),
+            confidence_level="high",
+            saliency_crop="100,50,400,300",
+        )
+        mcv = MCVBuilder().build(evidence, modality="CXR")
+
+        # evidence_text must be the feature_summary, not empty string
+        assert mcv.evidence_text != "", (
+            "MCVBuilder.evidence_text must be populated from feature_summary, not empty"
+        )
+        assert "opacity" in mcv.evidence_text.lower()
+
+    def test_region_features_extracted_from_feature_summary(self):
+        """Region keywords in feature_summary must produce spatial features."""
+        from rmoe.mcv import MCVBuilder
+        from rmoe.models import PerceptionEvidence
+
+        evidence = PerceptionEvidence(
+            feature_summary="Consolidation in the left upper lobe, mediastinum normal.",
+        )
+        mcv = MCVBuilder().build(evidence, modality="CXR")
+        region_names = [sf.region for sf in mcv.spatial_features]
+        assert "left upper lobe" in region_names, (
+            "Expected 'left upper lobe' region feature from feature_summary text"
+        )
+
+    def test_intensity_profile_derived_from_feature_summary(self):
+        """Density keywords in feature_summary must produce intensity descriptors."""
+        from rmoe.mcv import MCVBuilder
+        from rmoe.models import PerceptionEvidence
+
+        evidence = PerceptionEvidence(
+            feature_summary="Ground glass opacity in left upper lobe.",
+        )
+        mcv = MCVBuilder().build(evidence, modality="CXR")
+        assert "ground glass" in mcv.intensity_profile, (
+            "Expected 'ground glass' intensity profile entry from feature_summary"
+        )

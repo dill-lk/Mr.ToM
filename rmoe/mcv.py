@@ -126,7 +126,7 @@ class MCVBuilder:
 
         # ── Spatial features ──────────────────────────────────────────────────
         mcv.perception_conf  = getattr(evidence, "confidence", 0.0)
-        mcv.evidence_text    = getattr(evidence, "summary", "")
+        mcv.evidence_text    = getattr(evidence, "feature_summary", "")
         crop_str             = getattr(evidence, "saliency_crop", "")
         mcv.primary_crop     = self._parse_crop(crop_str, image_width, image_height)
         mcv.token_budget_used = self._estimate_token_budget(mcv.evidence_text)

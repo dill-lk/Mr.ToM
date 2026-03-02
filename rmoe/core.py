@@ -195,7 +195,7 @@ class DiagnosticEngine:
 
         run_start = time.time()
         last_reasoning: Optional[ReasoningOutput] = None
-        mpe_context    = image_path
+        wanna_feedback = ""
         prior_arll_ctx = ""
         doctor_hint:   Optional[DoctorFeedback] = None
 
@@ -215,10 +215,11 @@ class DiagnosticEngine:
             )
             vision_expert = VisionExpert(self._swapper, iteration)
             perception    = vision_expert.execute(
-                mpe_context,
+                image_path,
                 prior_image=prior_image,
                 doctor_feedback=doctor_hint,
                 prompt_dir=self._prompt_dir,
+                wanna_feedback=wanna_feedback,
             )
             mpe_gate_ok = self._mpe_gate.passes(perception)
             print_mpe_evidence(perception, mpe_gate_ok)
@@ -234,7 +235,7 @@ class DiagnosticEngine:
                 )
                 summary.trace.append(trace)
                 summary.iterations_executed = iteration
-                mpe_context = f"High-Res Crop|{iteration}|zoom=2.0"
+                wanna_feedback = f"High-Res Crop|{iteration}|zoom=2.0"
                 continue
 
             # ── Phase 2: ARLL ────────────────────────────────────────────────
@@ -356,11 +357,11 @@ class DiagnosticEngine:
 
             doctor_hint = self._hitl.prompt_wanna(req, payload, iteration)
             if doctor_hint and doctor_hint.is_zoom_command:
-                mpe_context = (
+                wanna_feedback = (
                     f"High-Res Crop|{doctor_hint.zoom_region}|zoom=2.5"
                 )
             else:
-                mpe_context = f"{req}|{payload}"
+                wanna_feedback = f"{req}|{payload}"
 
             prior_arll_ctx = f"Iter {iteration} DDx: {json.dumps(ens.to_dict())}"
 
