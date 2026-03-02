@@ -127,12 +127,27 @@ public:
     void unload_current_expert();
     bool load_expert_model(const std::string& model_path, const InferenceParams& params = {});
 
+    // Loads a CLIP mmproj model that is linked to the already-loaded language model.
+    // Must be called after a successful load_expert_model().
+    bool load_mmproj_model(const std::string& mmproj_path, int n_threads = 4);
+
+    // Returns true when a CLIP mmproj model is currently loaded.
+    [[nodiscard]] bool has_mmproj() const noexcept;
+
     // Infer using a system prompt and user input.
     // Applies the model's chat template (llama mode) or returns a mock response.
     // max_new_tokens overrides InferenceParams::max_new_tokens when > 0.
     [[nodiscard]] std::string infer_text(const std::string& system_prompt,
                                          const std::string& user_input,
                                          int max_new_tokens = -1) const;
+
+    // Run multimodal inference: embeds image_path via the mmproj CLIP model,
+    // then generates text with the language model.
+    // Falls back to infer_text when no mmproj context is loaded.
+    [[nodiscard]] std::string infer_with_image(const std::string& system_prompt,
+                                               const std::string& image_path,
+                                               const std::string& user_text,
+                                               int max_new_tokens = -1) const;
 
 private:
     struct Impl;
@@ -164,6 +179,9 @@ public:
 
     RunSummary process_patient_case(const std::string& patient_input) const;
     std::string ask_expert(const std::string& question, ExpertTarget target = ExpertTarget::Reasoning) const;
+
+    void set_temperature(float temperature);
+    void set_max_tokens(int max_new_tokens);
 
 private:
     WannaStateMachine state_machine_;

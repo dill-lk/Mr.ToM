@@ -26,6 +26,19 @@
 #include "llama.h"
 #endif
 
+#ifndef RMOE_HAS_MTMD
+#  if __has_include("mtmd.h")
+#    define RMOE_HAS_MTMD 1
+#  else
+#    define RMOE_HAS_MTMD 0
+#  endif
+#endif
+
+#if RMOE_HAS_MTMD
+#include "mtmd.h"
+#include "mtmd-helper.h"
+#endif
+
 namespace rmoe {
 
 namespace {
@@ -100,7 +113,11 @@ struct ExpertSwapper::Impl {
     llama_model*   model {nullptr};
     llama_context* ctx   {nullptr};
 #endif
+#if RMOE_HAS_MTMD
+    mtmd_context*  mtmd_ctx {nullptr};
+#endif
     std::string    model_path;
+    std::string    mmproj_path;
     InferenceParams params;
 };
 
@@ -112,6 +129,13 @@ void ExpertSwapper::unload_current_expert() {
     if (!impl_) {
         return;
     }
+
+#if RMOE_HAS_MTMD
+    if (impl_->mtmd_ctx != nullptr) {
+        mtmd_free(impl_->mtmd_ctx);
+        impl_->mtmd_ctx = nullptr;
+    }
+#endif
 
 #if RMOE_HAS_LLAMA
     if (impl_->ctx != nullptr) {
@@ -160,6 +184,52 @@ bool ExpertSwapper::load_expert_model(const std::string& model_path, const Infer
 
     std::cerr << "[llama.cpp] load: " << model_path << '\n';
     return true;
+}
+
+bool ExpertSwapper::load_mmproj_model(const std::string& mmproj_path, const int n_threads) {
+    if (!impl_) {
+        std::cerr << "[mtmd] load_mmproj_model: call load_expert_model first\n";
+        return false;
+    }
+    impl_->mmproj_path = mmproj_path;
+
+#if RMOE_HAS_LLAMA
+    if (impl_->model == nullptr) {
+        std::cerr << "[mtmd] load_mmproj_model: no language model loaded\n";
+        return false;
+    }
+#endif
+
+#if RMOE_HAS_MTMD
+    if (impl_->mtmd_ctx != nullptr) {
+        mtmd_free(impl_->mtmd_ctx);
+        impl_->mtmd_ctx = nullptr;
+    }
+    mtmd_context_params mparams = mtmd_context_params_default();
+    mparams.use_gpu       = true;
+    mparams.print_timings = false;
+    mparams.n_threads     = n_threads;
+    impl_->mtmd_ctx = mtmd_init_from_file(mmproj_path.c_str(), impl_->model, mparams);
+    if (impl_->mtmd_ctx == nullptr) {
+        std::cerr << "[mtmd] Failed loading mmproj: " << mmproj_path << '\n';
+        return false;
+    }
+    std::cerr << "[mtmd] load mmproj: " << mmproj_path << '\n';
+#else
+    std::cerr << "[mtmd] Mock mmproj (no mtmd support at compile time): " << mmproj_path << '\n';
+#endif
+    return true;
+}
+
+bool ExpertSwapper::has_mmproj() const noexcept {
+    if (!impl_) {
+        return false;
+    }
+#if RMOE_HAS_MTMD
+    return impl_->mtmd_ctx != nullptr;
+#else
+    return false;
+#endif
 }
 
 std::string ExpertSwapper::infer_text(const std::string& system_prompt,
@@ -281,6 +351,124 @@ std::string ExpertSwapper::infer_text(const std::string& system_prompt,
 #endif
 }
 
+std::string ExpertSwapper::infer_with_image(const std::string& system_prompt,
+                                             const std::string& image_path,
+                                             const std::string& user_text,
+                                             const int max_new_tokens) const {
+    if (!impl_) {
+        return "[inference-error] no active model";
+    }
+
+    const int n_gen = (max_new_tokens > 0) ? max_new_tokens : impl_->params.max_new_tokens;
+
+#if RMOE_HAS_LLAMA && RMOE_HAS_MTMD
+    if (impl_->model == nullptr || impl_->ctx == nullptr) {
+        return "[inference-error] model/context unavailable";
+    }
+    if (impl_->mtmd_ctx == nullptr) {
+        // No mmproj loaded — fall back to text-only inference
+        return infer_text(system_prompt, user_text, max_new_tokens);
+    }
+
+    // ── 1. Clear KV cache ────────────────────────────────────────────────────
+    llama_memory_clear(llama_get_memory(impl_->ctx), false);
+
+    // ── 2. Load image bitmap ─────────────────────────────────────────────────
+    mtmd_bitmap* bmp = mtmd_helper_bitmap_init_from_file(impl_->mtmd_ctx, image_path.c_str());
+    if (!bmp) {
+        std::cerr << "[mtmd] Failed to load image: " << image_path << '\n';
+        return infer_text(system_prompt, user_text, max_new_tokens);
+    }
+
+    // ── 3. Build prompt containing the media marker ──────────────────────────
+    const std::string full_prompt =
+        system_prompt + "\n" + mtmd_default_marker() + "\n" + user_text;
+
+    // ── 4. Tokenize (text + image chunks) ────────────────────────────────────
+    mtmd_input_text text_input;
+    text_input.text          = full_prompt.c_str();
+    text_input.add_special   = true;
+    text_input.parse_special = true;
+
+    mtmd_input_chunks* chunks = mtmd_input_chunks_init();
+    constexpr size_t kSingleImage = 1U;
+    const mtmd_bitmap* bitmaps_arr[] = {bmp};
+    const int32_t tok_res = mtmd_tokenize(impl_->mtmd_ctx, chunks, &text_input,
+                                           bitmaps_arr, kSingleImage);
+    mtmd_bitmap_free(bmp);
+    if (tok_res != 0) {
+        mtmd_input_chunks_free(chunks);
+        std::cerr << "[mtmd] Tokenization failed (res=" << tok_res << ")\n";
+        return infer_text(system_prompt, user_text, max_new_tokens);
+    }
+
+    // ── 5. Eval all chunks (text prefix + image embeddings + text suffix) ─────
+    // 512 tokens per batch is a conservative default that fits typical VRAM
+    // budgets; increase via InferenceParams if model context allows it.
+    constexpr int32_t kEvalBatch = 512;
+    llama_pos n_past = 0;
+    llama_pos new_n_past = 0;
+    if (mtmd_helper_eval_chunks(impl_->mtmd_ctx, impl_->ctx, chunks,
+                                 n_past, /*seq_id=*/0, kEvalBatch,
+                                 /*logits_last=*/true, &new_n_past) != 0) {
+        mtmd_input_chunks_free(chunks);
+        return "[inference-error] eval chunks failed";
+    }
+    mtmd_input_chunks_free(chunks);
+    n_past = new_n_past;
+
+    // ── 6. Build sampler chain ────────────────────────────────────────────────
+    llama_sampler* smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_k(impl_->params.top_k));
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_p(impl_->params.top_p, 1));
+    llama_sampler_chain_add(smpl, llama_sampler_init_temp(impl_->params.temperature));
+    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
+        impl_->params.penalty_last_n,
+        impl_->params.repeat_penalty,
+        0.0F, 0.0F));
+    llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+
+    const llama_vocab* vocab = llama_model_get_vocab(impl_->model);
+
+    // ── 7. Autoregressive generation ─────────────────────────────────────────
+    std::string output;
+    llama_batch gen_batch = llama_batch_init(1, 0, 1);
+    for (int i = 0; i < n_gen; ++i) {
+        const llama_token next = llama_sampler_sample(smpl, impl_->ctx, -1);
+        if (next == llama_vocab_eos(vocab)) {
+            break;
+        }
+
+        char piece[32] = {0};
+        const int written = llama_token_to_piece(vocab, next, piece,
+                                                  static_cast<int>(sizeof(piece)), 0, true);
+        if (written > 0) {
+            output.append(piece, static_cast<size_t>(written));
+        }
+
+        gen_batch.token[0]     = next;
+        gen_batch.pos[0]       = n_past++;
+        gen_batch.n_seq_id[0]  = 1;
+        gen_batch.seq_id[0][0] = 0;
+        gen_batch.logits[0]    = 1;
+        gen_batch.n_tokens     = 1;
+
+        if (llama_decode(impl_->ctx, gen_batch) != 0) {
+            break;
+        }
+    }
+
+    llama_sampler_free(smpl);
+    llama_batch_free(gen_batch);
+    return output.empty() ? std::string("[inference-warning] empty output") : output;
+#else
+    // No llama+mtmd at compile time — return a mock response
+    return "[mock-inference/image] " + impl_->model_path +
+           " | image=" + image_path +
+           " | user=" + user_text.substr(0, 40) + "...";
+#endif
+}
+
 WannaStateMachine::WannaStateMachine(const int hard_limit_iterations, const ConfidenceScore threshold)
     : hard_limit_iterations_(hard_limit_iterations), threshold_(threshold) {}
 
@@ -322,10 +510,41 @@ public:
         const std::string prompt = load_prompt_file(
             "prompts/mpe_system_prompt.txt",
             "You are MPE. Extract visual findings only.");
-        const std::string embed_summary = swapper_.infer_text(
-            prompt,
-            "Analyse the following medical image input and return structured visual evidence:\n" + input_data,
-            48);
+
+        std::string embed_summary;
+
+        // When a mmproj (CLIP) context is loaded and the input looks like an
+        // image file path, run multimodal inference.  Otherwise fall back to
+        // plain text inference (used on subsequent iterations where input_data
+        // contains feedback text, not an image path).
+        if (swapper_.has_mmproj()) {
+            const auto dot = input_data.rfind('.');
+            const bool is_image_path = (dot != std::string::npos) && [&] {
+                const std::string ext = input_data.substr(dot + 1U);
+                return ext == "png"  || ext == "jpg"  || ext == "jpeg"
+                    || ext == "bmp"  || ext == "gif"  || ext == "webp";
+            }();
+
+            if (is_image_path) {
+                embed_summary = swapper_.infer_with_image(
+                    prompt,
+                    input_data,
+                    "Analyse this medical image and return structured visual evidence.",
+                    48);
+            } else {
+                embed_summary = swapper_.infer_text(
+                    prompt,
+                    "Analyse the following medical context and return structured visual evidence:\n"
+                        + input_data,
+                    48);
+            }
+        } else {
+            embed_summary = swapper_.infer_text(
+                prompt,
+                "Analyse the following medical image input and return structured visual evidence:\n"
+                    + input_data,
+                48);
+        }
 
         return {0.0F, "MPE embeddings summary: " + embed_summary, {"none", ""}};
     }
@@ -434,21 +653,23 @@ RunSummary DiagnosticEngine::run_diagnostics(const std::string& patient_input) {
         cli::print_iteration_header(iteration, state_machine_.hard_limit_iterations());
         summary.iterations_executed = iteration;
 
-        if (!swapper_.load_expert_model(settings_.vision_projection_model, settings_.inference)) {
-            escalate_to_human({0.0F, "Failed loading MPE projection model.", {"none", ""}});
-            summary.escalated_to_human = true;
-            return summary;
-        }
-        VisionExpert mpe_projection(swapper_);
-        const DiagnosticData projection_data = mpe_projection.execute(current_input);
-
+        // ── PHASE 1: MPE (Multi-Modal Perception Engine) ────────────────────
+        // Load the language-model half of the vision model first (required by
+        // the mtmd API before the CLIP mmproj can be attached to it).
         if (!swapper_.load_expert_model(settings_.vision_text_model, settings_.inference)) {
             escalate_to_human({0.0F, "Failed loading MPE text model.", {"none", ""}});
             summary.escalated_to_human = true;
             return summary;
         }
-        VisionExpert mpe_encoder(swapper_);
-        const DiagnosticData perception_data = mpe_encoder.execute(current_input + " | " + projection_data.analysis);
+        // Now load the CLIP projection model as an mmproj linked to the LLM.
+        if (!swapper_.load_mmproj_model(settings_.vision_projection_model,
+                                         settings_.inference.n_threads)) {
+            escalate_to_human({0.0F, "Failed loading MPE projection model.", {"none", ""}});
+            summary.escalated_to_human = true;
+            return summary;
+        }
+        VisionExpert mpe(swapper_);
+        const DiagnosticData perception_data = mpe.execute(current_input);
         cli::print_mpe_status(settings_.vision_projection_model, settings_.vision_text_model);
 
         if (!swapper_.load_expert_model(settings_.reasoning_model, settings_.inference)) {
@@ -516,8 +737,12 @@ MrTom::MrTom(WannaStateMachine state_machine)
     : state_machine_(std::move(state_machine)) {}
 
 void MrTom::set_vision_model(const std::string& projection_model_path, const std::string& text_model_path) {
-    settings_.vision_projection_model = projection_model_path;
-    settings_.vision_text_model = text_model_path;
+    if (!projection_model_path.empty()) {
+        settings_.vision_projection_model = projection_model_path;
+    }
+    if (!text_model_path.empty()) {
+        settings_.vision_text_model = text_model_path;
+    }
 }
 
 void MrTom::set_reasoning_model(const std::string& reasoning_model_path) {
@@ -526,6 +751,14 @@ void MrTom::set_reasoning_model(const std::string& reasoning_model_path) {
 
 void MrTom::set_clinical_model(const std::string& clinical_model_path) {
     settings_.clinical_model = clinical_model_path;
+}
+
+void MrTom::set_temperature(const float temperature) {
+    settings_.inference.temperature = temperature;
+}
+
+void MrTom::set_max_tokens(const int max_new_tokens) {
+    settings_.inference.max_new_tokens = max_new_tokens;
 }
 
 void MrTom::configure_gate(const int max_iterations, const ConfidenceScore threshold) {

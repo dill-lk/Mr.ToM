@@ -11,9 +11,21 @@ namespace {
 void print_usage() {
     std::cout
         << "Usage:\n"
-        << "  ./rmoe_engine --vision-proj <path> --vision-text <path>"
-           " --reasoning <path> --clinical <path> --image <path> [--settings <json>]\n"
-        << "  Optional: --chat-target reasoning|clinical\n";
+        << "  ./rmoe_engine --model-vision <path> --model-proj <path>"
+           " --model-reasoning <path> --model-clinical <path> --image <path> [options]\n"
+        << "\n"
+        << "  Model paths (long-form aliases also accepted):\n"
+        << "    --model-vision   / --vision-text   : vision LLM   (vision_text.gguf)\n"
+        << "    --model-proj     / --vision-proj   : CLIP mmproj  (vision_proj.gguf)\n"
+        << "    --model-reasoning / --reasoning    : ARLL model   (reasoning_expert.gguf)\n"
+        << "    --model-clinical / --clinical      : CSR model    (clinical_expert.gguf)\n"
+        << "\n"
+        << "  Other options:\n"
+        << "    --image   <path>  : patient image file (required)\n"
+        << "    --settings <json> : JSON settings file\n"
+        << "    --temp    <f>     : sampling temperature (default 0.2)\n"
+        << "    --n-predict <n>   : max tokens to generate (default 128)\n"
+        << "    --chat-target reasoning|clinical\n";
 }
 
 // Display the final clinical report by parsing the JSON and printing key fields.
@@ -118,22 +130,40 @@ int main(int argc, char** argv) {
     std::string clinical;
     std::string image_path;
     std::string settings_path;
+    float       cli_temperature  = -1.0F; // <0 means "not set by CLI"
+    int         cli_max_tokens   = -1;    // <0 means "not set by CLI"
     rmoe::ExpertTarget chat_target = rmoe::ExpertTarget::Reasoning;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg == "--vision-proj" && i + 1 < argc) {
+        // vision projection / mmproj (CLIP)
+        if ((arg == "--vision-proj" || arg == "--model-proj") && i + 1 < argc) {
             vision_proj = argv[++i];
-        } else if (arg == "--vision-text" && i + 1 < argc) {
+        // vision text / LLM half
+        } else if ((arg == "--vision-text" || arg == "--model-vision") && i + 1 < argc) {
             vision_text = argv[++i];
-        } else if (arg == "--reasoning" && i + 1 < argc) {
+        // reasoning / ARLL
+        } else if ((arg == "--reasoning" || arg == "--model-reasoning") && i + 1 < argc) {
             reasoning = argv[++i];
-        } else if (arg == "--clinical" && i + 1 < argc) {
+        // clinical / CSR
+        } else if ((arg == "--clinical" || arg == "--model-clinical") && i + 1 < argc) {
             clinical = argv[++i];
         } else if (arg == "--image" && i + 1 < argc) {
             image_path = argv[++i];
         } else if (arg == "--settings" && i + 1 < argc) {
             settings_path = argv[++i];
+        } else if ((arg == "--temp" || arg == "--temperature") && i + 1 < argc) {
+            try {
+                cli_temperature = std::stof(argv[++i]);
+            } catch (...) {
+                std::cerr << "[cli] Invalid value for " << arg << ": " << argv[i] << '\n';
+            }
+        } else if ((arg == "--n-predict" || arg == "--n_predict") && i + 1 < argc) {
+            try {
+                cli_max_tokens = std::stoi(argv[++i]);
+            } catch (...) {
+                std::cerr << "[cli] Invalid value for " << arg << ": " << argv[i] << '\n';
+            }
         } else if (arg == "--chat-target" && i + 1 < argc) {
             const std::string target = argv[++i];
             if (target == "clinical") {
@@ -159,8 +189,20 @@ int main(int argc, char** argv) {
 
     rmoe::MrTom mr_tom(rmoe::WannaStateMachine(kHardLimitIterations, kThreshold));
 
+    // ── Load settings JSON first (base config) ───────────────────────────────
+    if (!settings_path.empty()) {
+        if (!mr_tom.load_settings(settings_path)) {
+            std::cerr << "[settings] Failed to load settings JSON, using defaults.\n";
+        }
+    }
+
+    // ── CLI flags override settings (explicit paths always win) ─────────────
     if (!vision_proj.empty() && !vision_text.empty()) {
         mr_tom.set_vision_model(vision_proj, vision_text);
+    } else if (!vision_proj.empty()) {
+        mr_tom.set_vision_model(vision_proj, "");
+    } else if (!vision_text.empty()) {
+        mr_tom.set_vision_model("", vision_text);
     }
     if (!reasoning.empty()) {
         mr_tom.set_reasoning_model(reasoning);
@@ -168,11 +210,11 @@ int main(int argc, char** argv) {
     if (!clinical.empty()) {
         mr_tom.set_clinical_model(clinical);
     }
-
-    if (!settings_path.empty()) {
-        if (!mr_tom.load_settings(settings_path)) {
-            std::cerr << "[settings] Failed to load settings JSON, using defaults.\n";
-        }
+    if (cli_temperature >= 0.0F) {
+        mr_tom.set_temperature(cli_temperature);
+    }
+    if (cli_max_tokens > 0) {
+        mr_tom.set_max_tokens(cli_max_tokens);
     }
 
     // ── Patient / gate info ──────────────────────────────────────────────────
