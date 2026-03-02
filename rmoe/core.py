@@ -22,8 +22,11 @@ from typing import Optional
 from rmoe.agents import (ExpertSwapper, ReasoningExpert, ReportingExpert,
                           VisionExpert)
 from rmoe.audit import AuditLogger, SessionReportGenerator
+from rmoe.bias import CognitiveBiasDetector, print_bias_report
 from rmoe.calibration import CalibrationTracker, compute_uncertainty
 from rmoe.hitl import ExpertQueryRouter, HITLCoordinator
+from rmoe.mcv import MCVBuilder, MCVInjector
+from rmoe.modality import ModalityEscalationRouter, print_escalation_suggestion
 from rmoe.models import (DoctorFeedback, ExpertTarget, FeedbackTensor,
                           HITLMode, InferenceParams, IterationTrace,
                           ModelSettings, PerceptionEvidence, ReasoningOutput,
@@ -31,6 +34,8 @@ from rmoe.models import (DoctorFeedback, ExpertTarget, FeedbackTensor,
                           WannaState)
 from rmoe.ontology import ClinicalEntityExtractor, RiskStratifier
 from rmoe.rag import VectorRAGEngine
+from rmoe.safety import CSRSafetyValidator, SafetyStatus, print_safety_report
+from rmoe.temporal import TemporalComparator
 from rmoe.ui import (GREEN, BOLD, CYAN, DIM, MAGENTA, RED, RESET, YELLOW,
                       print_arll_gate, print_arll_header, print_csr_header,
                       print_mpe_evidence, print_mpe_header,
@@ -159,6 +164,13 @@ class DiagnosticEngine:
         self._stratifier  = RiskStratifier()
         self._swapper     = ExpertSwapper()
         self._prompt_dir  = prompt_dir
+        # Paper-aligned modules
+        self._bias        = CognitiveBiasDetector()
+        self._mcv_builder = MCVBuilder()
+        self._mcv_injector = MCVInjector()
+        self._safety      = CSRSafetyValidator()
+        self._modality    = ModalityEscalationRouter()
+        self._temporal    = TemporalComparator()
 
     # ── Main entry-point ─────────────────────────────────────────────────────
 
@@ -231,12 +243,19 @@ class DiagnosticEngine:
             )
             print_arll_header(os.path.basename(self._settings.reasoning_model))
 
+            # Build MCV from MPE output (paper §"Multi-Modal Contextual Vectors")
+            mcv = self._mcv_builder.build(
+                perception,
+                modality=getattr(self._settings, "modality", "CXR"),
+            )
+            mcv_context = self._mcv_injector.inject(mcv)
+
             self._swapper.load_expert_model(
                 self._settings.reasoning_model, self._settings.inference
             )
             reasoning_expert = ReasoningExpert(self._swapper, iteration)
             reasoning = reasoning_expert.execute(
-                mpe_evidence=json.dumps({
+                mpe_evidence=mcv_context + json.dumps({
                     "rois": perception.rois,
                     "feature_summary": perception.feature_summary,
                     "confidence_level": perception.confidence_level,
@@ -260,6 +279,18 @@ class DiagnosticEngine:
                 payload=reasoning.feedback_payload,
                 rag_refs=rag_refs,
             )
+
+            # ── Bias detection (paper §"Error Patterns and Bias Mitigation") ──
+            ddx_list = [{"diagnosis": h.diagnosis, "probability": h.probability}
+                        for h in ens.hypotheses]
+            bias_report = self._bias.analyse(
+                cot_text=reasoning.cot,
+                ddx_hypotheses=ddx_list,
+                temporal_note=reasoning.temporal_note,
+                sc=sc,
+            )
+            if not bias_report.clean:
+                print_bias_report(bias_report)
 
             # Update calibration tracker
             top_p  = ens.primary.probability if ens.primary else 0.5
@@ -295,6 +326,18 @@ class DiagnosticEngine:
 
             if decision.state == WannaState.EscalateToHuman:
                 reason = f"Sc={sc:.4f} < {self._sm.threshold:.2f} after {iteration} iterations."
+                # Check modality escalation before human escalation
+                # (paper §"Request Additional Modalities")
+                mod_suggestions = self._modality.suggest(
+                    current_modality=getattr(self._settings, "modality", "CXR"),
+                    evidence_text=perception.feature_summary,
+                    ddx_labels=[h.diagnosis for h in ens.hypotheses[:3]],
+                    sc=sc,
+                )
+                if mod_suggestions:
+                    print_escalation_suggestion(mod_suggestions[0])
+                    # Update reason with modality suggestion
+                    reason += f" Modality escalation suggested: {mod_suggestions[0].recommended_modality.value}"
                 print_abstain(reason)
                 summary.escalated_to_human = True
                 if audit_logger:
@@ -335,6 +378,19 @@ class DiagnosticEngine:
             )
             summary.final_report_json = report_json
             self._swapper.unload()
+
+            # ── CSR dual-layer safety validation (paper §"dual-layer validation")
+            if report_json:
+                try:
+                    report_text = report_json if isinstance(report_json, str) else \
+                                  json.dumps(report_json)
+                    safety = self._safety.validate(report_text)
+                    if safety.status != SafetyStatus.PASS:
+                        print_safety_report(safety)
+                    if safety.annotation:
+                        summary.final_report_json = report_text + safety.annotation
+                except Exception:
+                    pass
 
         summary.total_elapsed_s = time.time() - run_start
 

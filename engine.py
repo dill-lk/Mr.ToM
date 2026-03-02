@@ -140,6 +140,16 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Print all ASCII charts (Sc progress, DDx evolution, etc.)")
     p.add_argument("--benchmark-only", action="store_true",
                    help="Print benchmark comparison table and exit")
+    p.add_argument("--benchmark",    action="store_true",
+                   help="Run full benchmark evaluation on dataset and print results")
+    p.add_argument("--benchmark-dataset", default=None,
+                   help="Path to benchmark CSV (default: built-in 20-case dataset)")
+    p.add_argument("--benchmark-max", type=int, default=None,
+                   help="Limit benchmark to first N cases (useful for quick test)")
+    p.add_argument("--save-results", default=None,
+                   help="Save benchmark JSON results to this path")
+    p.add_argument("--latex",        action="store_true",
+                   help="Print LaTeX tabular block for paper Table 1")
     p.add_argument("--quiet",        action="store_true",
                    help="Suppress HITL prompts and banner (useful for scripting)")
 
@@ -158,6 +168,32 @@ def main(argv=None) -> int:
         print_banner()
         benchmark_comparison()
         reliability_diagram(_paper_calibration_bins(), 0.08)
+        return 0
+
+    # ── Full benchmark evaluation (paper §4 metrics) ──────────────────────────
+    if args.benchmark:
+        from rmoe.eval import BenchmarkRunner, BenchmarkDataset
+        if not args.quiet:
+            print_banner()
+        print(f"\n  Loading benchmark dataset …")
+        dataset = BenchmarkDataset(args.benchmark_dataset)
+
+        sm      = WannaStateMachine(hard_limit=args.max_iter or 3,
+                                    threshold=args.threshold or 0.90)
+        mr_tom  = MrTom(sm, hitl_mode=HITLMode.Disabled)
+        if os.path.exists(args.settings):
+            mr_tom.load_settings(args.settings)
+
+        runner  = BenchmarkRunner(mr_tom, verbose=not args.quiet)
+        results = runner.run(dataset, max_cases=args.benchmark_max)
+        runner.print_report(results)
+
+        if args.latex:
+            print("\n" + runner.print_latex(results))
+
+        if args.save_results:
+            runner.save_results(results, args.save_results)
+            print(f"\n  Results saved → {args.save_results}")
         return 0
 
     if not args.quiet:

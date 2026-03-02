@@ -12,8 +12,9 @@ a structured TemporalAnalysis with:
   • natural-language interval note for ARLL context injection
   • Sc adjustment factor — confidence bonus for "Stable", penalty for "Progressed"
 
-When image files are not available (mock mode), the comparator uses the
-diagnosis text and iteration number to synthesise a realistic note.
+mock_temporal_note(has_prior, iteration) — returns a realistic mock temporal
+note string for demo / offline mode (no real images or prior scan required).
+When image files are not available the comparator also falls back to this.
 """
 from __future__ import annotations
 

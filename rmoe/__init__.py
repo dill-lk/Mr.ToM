@@ -41,9 +41,26 @@ from rmoe.charts import (
     benchmark_comparison, ddx_evolution_chart, reliability_diagram,
     sc_progression_chart, uncertainty_heatmap,
 )
+# ── New paper-aligned modules ─────────────────────────────────────────────────
+from rmoe.bias import CognitiveBiasDetector, BiasType, BiasReport, print_bias_report
+from rmoe.mcv import MCVBuilder, MCVInjector, MCVTensor
+from rmoe.safety import (
+    CSRSafetyValidator, SafetyStatus, SafetyReport, print_safety_report,
+)
+from rmoe.modality import (
+    ModalityEscalationRouter, Modality, EscalationUrgency, ModalityEscalation,
+)
+from rmoe.temporal import (
+    TemporalComparator, TemporalAnalysis, ChangeClass, mock_temporal_note,
+)
+from rmoe.saliency import SaliencyProcessor, CropCoordinates, AttentionMap
+from rmoe.dicom import DICOMProcessor, WindowPreset, get_window, WINDOW_PRESETS
+from rmoe.eval import BenchmarkRunner, BenchmarkDataset, BenchmarkMetrics, CaseResult
+from rmoe.ensemble import MultiTemperatureEnsemble
 
 __version__ = "2.0.0"
 __author__  = "R-MoE Research Team"
+__paper__   = "Recursive Multi-Agent Mixture-of-Experts (R-MoE) for Autonomous Clinical Diagnostics"
 
 __all__ = [
     # Core engine
@@ -72,6 +89,24 @@ __all__ = [
     # Charts
     "sc_progression_chart", "ddx_evolution_chart", "uncertainty_heatmap",
     "reliability_diagram", "benchmark_comparison",
+    # Bias detection (paper §Error Patterns)
+    "CognitiveBiasDetector", "BiasType", "BiasReport", "print_bias_report",
+    # MCV inter-agent transfer (paper §MCV)
+    "MCVBuilder", "MCVInjector", "MCVTensor",
+    # CSR safety validator (paper §dual-layer)
+    "CSRSafetyValidator", "SafetyStatus", "SafetyReport", "print_safety_report",
+    # Modality escalation (paper §#wanna# mode 3)
+    "ModalityEscalationRouter", "Modality", "EscalationUrgency", "ModalityEscalation",
+    # Temporal analysis (paper §3.1 ARLL)
+    "TemporalComparator", "TemporalAnalysis", "ChangeClass", "mock_temporal_note",
+    # Saliency / crops (paper §MPE)
+    "SaliencyProcessor", "CropCoordinates", "AttentionMap",
+    # DICOM preprocessing
+    "DICOMProcessor", "WindowPreset", "get_window", "WINDOW_PRESETS",
+    # Benchmark / evaluation (paper §4)
+    "BenchmarkRunner", "BenchmarkDataset", "BenchmarkMetrics", "CaseResult",
+    # Multi-temperature ensemble (paper §3.1 Sc formula)
+    "MultiTemperatureEnsemble",
     # Package metadata
-    "__version__", "__author__",
+    "__version__", "__author__", "__paper__",
 ]

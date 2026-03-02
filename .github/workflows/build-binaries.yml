@@ -20,8 +20,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install linting tools
-        run: pip install pyflakes
+      - name: Install dependencies
+        run: pip install pyflakes pytest
 
       - name: Syntax check engine.py
         run: python -m py_compile engine.py && echo "✅ engine.py syntax OK"
@@ -29,13 +29,22 @@ jobs:
       - name: Syntax check colab_runner.py
         run: python -m py_compile colab_runner.py && echo "✅ colab_runner.py syntax OK"
 
+      - name: Syntax check rmoe package
+        run: |
+          for f in rmoe/*.py; do
+            python -m py_compile "$f" && echo "✅ $f"
+          done
+
       - name: Pyflakes engine.py
         run: python -m pyflakes engine.py
 
-      - name: Pyflakes colab_runner.py
-        run: python -m pyflakes colab_runner.py
+      - name: Pyflakes rmoe package
+        run: python -m pyflakes rmoe/
+
+      - name: Run unit tests (119 tests, no GPU/model files needed)
+        run: python -m pytest tests/ -v --tb=short 2>&1
 
       - name: Verify mock pipeline (no models needed)
         run: |
-          python engine.py --image test_patient.png 2>&1 | head -60
+          python engine.py --image test_patient.png --hitl disabled --quiet 2>&1 | head -60
         continue-on-error: true   # models not available in CI; syntax/import errors still fail

@@ -1,12 +1,11 @@
 {
-  "_comment": "T4 / Colab free-tier settings — small quantised models",
+  "_comment": "Research-scale settings — 8x A100 cluster (paper §4.2)",
   "_drive_folder": "MyDrive/Medical_MoE_Models/",
   "_models": {
-    "vision_proj_model":  "vision_proj.gguf   ← Moondream2 CLIP mmproj companion",
-    "vision_text_model":  "vision_text.gguf   ← Moondream2-2B (or Qwen2-VL-2B)",
-    "reasoning_model":    "reasoning_expert.gguf ← DeepSeek-R1-Distill-Qwen-1.5B-Q8",
-    "clinical_model":     "clinical_expert.gguf  ← MedGemma-2B-it-Q4_K_M",
-    "test_image":         "test_patient.png"
+    "vision_proj_model":  "vision_proj.gguf   ← Qwen2-VL-72B mmproj-Q4",
+    "vision_text_model":  "vision_text.gguf   ← Qwen2-VL-72B-Instruct-Q4_K_M",
+    "reasoning_model":    "reasoning_expert.gguf ← DeepSeek-R1-671B-Q4_K_M",
+    "clinical_model":     "clinical_expert.gguf  ← Llama-3-Medius-70B-Q4_K_M"
   },
   "vision_proj_model":    "models/vision_proj.gguf",
   "vision_text_model":    "models/vision_text.gguf",
@@ -16,10 +15,10 @@
   "confidence_threshold": 0.90,
   "max_iterations":       3,
   "inference": {
-    "n_ctx":           2048,
-    "n_threads":       4,
-    "n_threads_batch": 4,
-    "max_new_tokens":  512,
+    "n_ctx":           4096,
+    "n_threads":       8,
+    "n_threads_batch": 8,
+    "max_new_tokens":  1024,
     "temperature":     0.2,
     "top_k":           40,
     "top_p":           0.95,
