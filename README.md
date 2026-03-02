@@ -8,6 +8,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](#requirements)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 [![Paper](https://img.shields.io/badge/paper-LaTeX-orange)](paper/rmoe_paper.tex)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dill-lk/R-MoE-for-Clinical-Diagnostics/blob/main/RUN.ipynb)
 
 </div>
 
@@ -19,24 +20,47 @@ R-MoE addresses *diagnostic hallucinations* in medical AI by replacing monolithi
 vision-language models with a **three-phase recursive agent pipeline** that mimics
 the dual-process cognitive workflow of human radiologists:
 
-```
-[DICOM / PNG input]
-      │
-Phase 1: MPE ──── vision_text.gguf + vision_proj.gguf
-      │           (perception, saliency crop, MCV, DICOM windowing)
-      │
-Phase 2: ARLL ─── reasoning_expert.gguf
-      │           (Sc = 1−σ², DDx ensemble, bias detection, temporal analysis)
-      │
-  Sc ≥ 0.90 ──→  Phase 3: CSR ── clinical_expert.gguf
-                              (ICD-11, SNOMED CT, TIRADS/BI-RADS/Lung-RADS,
-                               dual-layer safety validator, HITL review)
+```mermaid
+flowchart TD
+    INPUT(["📥 DICOM / PNG Input\n+ Clinical Notes"]):::input
 
-  Sc < 0.90 ──→  #wanna# protocol (max 3 iterations)
-                   1. High-Res Crop
-                   2. Alternate View
-                   3. Modality Escalation (CXR→CT→MRI→PET-CT)
-                 → EscalateToHuman if still uncertain
+    DOCTOR_UPLOAD(["👨‍⚕️ Doctor Upload /\nZoom Command"]):::hitl
+
+    MPE["🔬 Phase 1 · MPE — Perception\nMoondream2 / Qwen2-VL\n─────────────────────\n• Dynamic Resolution Adaptation\n• Visual Token Merger\n• Saliency-Aware Crop\n• DICOM Windowing\n• MCV Builder"]:::phase
+
+    ARLL["🧠 Phase 2 · ARLL — Reasoning\nDeepSeek-R1-Distill\n─────────────────────\n• Chain-of-Thought (CoT)\n• DDx Ensemble  Sc = 1−σ²\n• Vector RAG (BM25)\n• Cognitive Bias Detector\n• Temporal Comparator"]:::phase
+
+    DOCTOR_QUERY(["👨‍⚕️ Doctor Query\n'Explain this'"]):::hitl
+
+    GATE{"Sc ≥ 0.90?"}:::gate
+
+    CSR["📋 Phase 3 · CSR — Clinical Synthesis\nMedGemma-2B\n─────────────────────\n• ICD-11 / SNOMED CT\n• TIRADS / BI-RADS / Lung-RADS\n• Dual-Layer Safety Validator\n• HITL Radiologist Flag"]:::phase
+
+    WANNA["🔁 #wanna# Protocol\nmax 3 iterations\n─────────────────────\n1. High-Res Crop\n2. Alternate View\n3. Modality Escalation\n   CXR→CT→MRI→PET-CT"]:::loop
+
+    ESCALATE(["🚨 Escalate to Human\nif still uncertain"]):::escalate
+
+    REPORT(["📄 Final Report\n+ Audit Trail\n+ Session Report"]):::output
+
+    INPUT --> MPE
+    DOCTOR_UPLOAD -->|feedback| MPE
+    MPE -->|MPE Confidence Gate| ARLL
+    DOCTOR_QUERY -->|query| ARLL
+    ARLL --> GATE
+    GATE -->|YES| CSR
+    GATE -->|NO| WANNA
+    WANNA -->|retry| MPE
+    WANNA -->|exceeded max iter| ESCALATE
+    CSR --> REPORT
+    ESCALATE --> REPORT
+
+    classDef input    fill:#4A90D9,stroke:#2C5F8A,color:#fff,font-weight:bold
+    classDef phase    fill:#1E3A5F,stroke:#4A90D9,color:#fff,font-weight:bold
+    classDef gate     fill:#D4A017,stroke:#8B6914,color:#fff,font-weight:bold
+    classDef loop     fill:#C0392B,stroke:#7B241C,color:#fff,font-weight:bold
+    classDef escalate fill:#E74C3C,stroke:#C0392B,color:#fff,font-weight:bold
+    classDef hitl     fill:#27AE60,stroke:#1E8449,color:#fff,font-weight:bold
+    classDef output   fill:#8E44AD,stroke:#6C3483,color:#fff,font-weight:bold
 ```
 
 ### Key results (paper §5)
@@ -97,7 +121,7 @@ python engine.py --image test_patient.png
 
 ### Colab (with real models)
 
-Run cells in order in `colab_runner.py` — see [RUN.md](RUN.md) for full instructions.
+Open **[RUN.ipynb](RUN.ipynb)** in Google Colab and run cells in order — see [RUN.md](RUN.md) for the full written guide.
 
 ```python
 # Cell 4 — stage models from Drive
