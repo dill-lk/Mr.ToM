@@ -34,6 +34,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp/CMakeLists.txt")
 
     if(TARGET llama)
         target_link_libraries(rmoe_engine PRIVATE llama)
+        target_compile_definitions(rmoe_engine PRIVATE RMOE_HAS_LLAMA=1)
     endif()
 
     if(TARGET common)

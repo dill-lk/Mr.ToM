@@ -13,11 +13,16 @@
 
 #include <nlohmann/json.hpp>
 
-#if __has_include("llama.h")
+#ifndef RMOE_HAS_LLAMA
+#  if __has_include("llama.h")
+#    define RMOE_HAS_LLAMA 1
+#  else
+#    define RMOE_HAS_LLAMA 0
+#  endif
+#endif
+
+#if RMOE_HAS_LLAMA
 #include "llama.h"
-#define RMOE_HAS_LLAMA 1
-#else
-#define RMOE_HAS_LLAMA 0
 #endif
 
 namespace rmoe {

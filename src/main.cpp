@@ -94,7 +94,10 @@ int main(int argc, char** argv) {
     std::string doctor_query;
     while (true) {
         std::cout << "\n[DOCTOR]: ";
-        std::getline(std::cin, doctor_query);
+        std::cout.flush();
+        if (!std::getline(std::cin, doctor_query)) {
+            break; // EOF or stream error — exit gracefully (e.g. subprocess use)
+        }
         if (doctor_query == "exit") {
             break;
         }
