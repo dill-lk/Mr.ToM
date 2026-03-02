@@ -51,7 +51,7 @@ Phase 2: ARLL ─── reasoning_expert.gguf
 
 ---
 
-## �� Google Drive Layout (required before running)
+## Google Drive Layout (required before running)
 
 All model files live in one folder in your Drive.
 **The filenames must match exactly:**
