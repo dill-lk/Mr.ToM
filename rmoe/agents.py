@@ -127,7 +127,7 @@ def _parse_arll_output(raw: str) -> ReasoningOutput:
     blob = _extract_json_block(raw)
 
     if blob:
-        out.cot = blob.get("cot", raw[:300])
+        out.cot = blob.get("cot", raw)
         hyps = [
             DDxHypothesis(
                 diagnosis=str(item.get("diagnosis", "")),
@@ -147,7 +147,7 @@ def _parse_arll_output(raw: str) -> ReasoningOutput:
         return out
 
     # Regex fallback
-    out.cot = raw[:500]
+    out.cot = raw
     pairs = re.findall(
         r"([A-Za-z][A-Za-z ]{3,40})[:\-–]?\s*([0-9]+(?:\.[0-9]+)?)\s*%?", raw
     )
@@ -517,9 +517,13 @@ class VisionExpert:
 def _parse_mpe_evidence(raw: str) -> PerceptionEvidence:
     blob = _extract_json_block(raw)
     if blob:
+        # Fall back to full raw text when the JSON block has no feature_summary,
+        # so the downstream reasoning expert always receives the vision model's
+        # full description rather than an empty string.
+        feature_summary = blob.get("feature_summary") or raw
         return PerceptionEvidence(
             rois=blob.get("rois", []),
-            feature_summary=blob.get("feature_summary", ""),
+            feature_summary=feature_summary,
             confidence_level=blob.get("confidence_level", "medium"),
             saliency_crop=blob.get("saliency_crop", ""),
             raw_summary=raw,
@@ -616,7 +620,7 @@ class ReportingExpert:
             "You are CSR. Generate a structured ICD-11 JSON clinical report.",
         )
         user_input = (
-            f"Validated ARLL reasoning:\n{reasoning.cot}\n\n"
+            f"Validated ARLL reasoning:\n{reasoning.cot or reasoning.raw_output}\n\n"
             f"DDx ensemble:\n{json.dumps(reasoning.ensemble.to_dict(), indent=2)}\n\n"
             f"Final Sc = {reasoning.ensemble.sc:.4f}, "
             f"σ² = {reasoning.ensemble.sigma2:.6f}, "

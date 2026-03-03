@@ -225,6 +225,38 @@ class TestParseMpeEvidence:
         assert ev.rois == []
         assert ev.confidence_level == "medium"
 
+    def test_json_with_missing_feature_summary_falls_back_to_raw(self):
+        """JSON block with no feature_summary field → feature_summary must equal
+        the full raw text so the downstream reasoning expert is not starved."""
+        from rmoe.agents import _parse_mpe_evidence
+        raw = json.dumps({
+            "rois": [{"label": "LUL opacity", "suspicion": "high"}],
+            "confidence_level": "high",
+            "saliency_crop": "120,60,380,280",
+            # feature_summary intentionally absent
+        })
+        ev = _parse_mpe_evidence(raw)
+        assert ev.feature_summary == raw, (
+            "When feature_summary is absent from the JSON blob, "
+            "feature_summary must fall back to the full raw text"
+        )
+
+    def test_json_with_empty_feature_summary_falls_back_to_raw(self):
+        """JSON block with feature_summary='' → feature_summary must equal
+        the full raw text (empty string is falsy, so raw is used)."""
+        from rmoe.agents import _parse_mpe_evidence
+        raw = json.dumps({
+            "rois": [],
+            "feature_summary": "",
+            "confidence_level": "low",
+            "saliency_crop": "",
+        })
+        ev = _parse_mpe_evidence(raw)
+        assert ev.feature_summary == raw, (
+            "When feature_summary is an empty string in the JSON blob, "
+            "feature_summary must fall back to the full raw text"
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  MCVBuilder  —  feature_summary attribute fix
@@ -280,4 +312,134 @@ class TestMCVBuilderAttributeFix:
         mcv = MCVBuilder().build(evidence, modality="CXR")
         assert "ground glass" in mcv.intensity_profile, (
             "Expected 'ground glass' intensity profile entry from feature_summary"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  _parse_arll_output  —  CoT must not be truncated
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestParseArllOutputCotNotTruncated:
+    """The CoT field must carry the full reasoning text to the CSR (MedGemma)."""
+
+    def _long_cot(self) -> str:
+        """Build a CoT string that is longer than the old 300/500-char truncation limits."""
+        return (
+            "Step 1 — Evidence review: MPE identified a 3.2×2.8 cm spiculated "
+            "opacity in the posterior left upper lobe with irregular margin. "
+            "Step 2 — Prior imaging not available; temporal comparison not possible. "
+            "Step 3 — DDx construction: upper-lobe spiculated lesion carries broad "
+            "differential including adenocarcinoma, community-acquired pneumonia, "
+            "sarcoidosis, and TB reactivation. "
+            "Step 4 — Ensemble analysis: adenocarcinoma (0.58), CAP (0.19), "
+            "sarcoidosis (0.13), TB (0.10). "
+            "Step 5 — σ² = 0.0312, Sc = 0.8587 — still below 0.90 threshold. "
+            "Recommend lateral projection to confirm posterior pleural space."
+        )
+
+    def test_json_path_cot_not_truncated(self):
+        """When ARLL outputs valid JSON with a 'cot' field, the full value is preserved."""
+        long_cot = self._long_cot()
+        assert len(long_cot) > 300, "test prerequisite: CoT must exceed old 300-char limit"
+        raw = json.dumps({
+            "cot": long_cot,
+            "ddx": [
+                {"diagnosis": "Pulmonary adenocarcinoma", "probability": 0.58, "evidence": "spiculated"},
+            ],
+            "sigma2": 0.03, "sc": 0.87,
+            "wanna": True, "feedback_request": "Alternate View",
+            "feedback_payload": "region=LUL;angle=lateral",
+            "rag_references": [], "temporal_note": None,
+        })
+        out = _parse_arll_output(raw)
+        assert out.cot == long_cot, "CoT must equal the full value from the JSON blob"
+
+    def test_json_path_cot_fallback_uses_full_raw(self):
+        """When ARLL JSON has no 'cot' field, the full raw string is used — not raw[:300]."""
+        long_cot = self._long_cot()
+        assert len(long_cot) > 300
+        raw = json.dumps({
+            # 'cot' key intentionally absent
+            "ddx": [{"diagnosis": "Rib fracture", "probability": 0.80, "evidence": "break"}],
+            "sigma2": 0.02, "sc": 0.98,
+            "wanna": False, "feedback_request": None,
+            "feedback_payload": None,
+            "rag_references": [], "temporal_note": None,
+        })
+        out = _parse_arll_output(raw)
+        assert out.cot == raw, (
+            "When 'cot' is missing from ARLL JSON, cot must be the full raw output"
+        )
+
+    def test_regex_fallback_cot_uses_full_raw(self):
+        """When ARLL outputs plain text (no JSON), the full text is stored as cot."""
+        long_prose = self._long_cot()
+        # Append a valid diagnosis:probability pair so the regex fallback finds something
+        raw = long_prose + "\nRib fracture: 0.75 — cortical break."
+        assert len(raw) > 500, "test prerequisite: must exceed old 500-char limit"
+        out = _parse_arll_output(raw)
+        assert out.cot == raw, (
+            "Regex fallback must store the full raw text in cot, not raw[:500]"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ReportingExpert  —  cot-or-raw_output fallback
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestReportingExpertCotFallback:
+    """ReportingExpert must send reasoning.cot to CSR; when cot is empty it must
+    fall back to reasoning.raw_output so MedGemma always has input."""
+
+    def _run_and_capture(self, cot: str, raw_output: str) -> str:
+        """Run ReportingExpert with mocked inference and return the user_input
+        that was passed to infer_text()."""
+        import json as _json
+        from unittest.mock import patch
+        from rmoe.agents import ReportingExpert, ExpertSwapper
+        from rmoe.models import ReasoningOutput, DDxEnsemble, DDxHypothesis
+
+        captured: dict = {}
+        mock_response = _json.dumps({
+            "standard": "ICD-11", "snomed_ct": "N/A",
+            "risk_stratification": {"scale": "N/A", "score": "N/A",
+                                    "interpretation": "", "action": ""},
+            "narrative": "test", "summary": "test",
+            "treatment_recommendations": "none",
+            "hitl_review_required": False, "hitl_reason": "",
+        })
+
+        swapper = ExpertSwapper()
+
+        def fake_infer_text(system_prompt, user_input, **kw):
+            captured["user_input"] = user_input
+            return mock_response
+
+        reasoning = ReasoningOutput(
+            cot=cot,
+            raw_output=raw_output,
+            ensemble=DDxEnsemble([DDxHypothesis("Rib fracture", 0.90)]),
+        )
+        rpt = ReportingExpert(swapper)
+        # Patch both _HAS_LLAMA_CPP (so mock path is skipped) and infer_text
+        with patch("rmoe.agents._HAS_LLAMA_CPP", True):
+            with patch.object(swapper, "infer_text", side_effect=fake_infer_text):
+                rpt.execute(reasoning, iterations_used=1)
+
+        return captured.get("user_input", "")
+
+    def test_cot_used_when_present(self):
+        """When cot is populated it is included in the user_input passed to CSR."""
+        cot_text = "Full chain-of-thought reasoning here."
+        user_input = self._run_and_capture(cot=cot_text, raw_output="raw full output")
+        assert cot_text in user_input, (
+            "reasoning.cot must appear in the prompt sent to CSR"
+        )
+
+    def test_raw_output_fallback_when_cot_empty(self):
+        """When reasoning.cot is empty, raw_output must be used instead."""
+        raw_output = "Full ARLL raw output text — no cot field was parsed."
+        user_input = self._run_and_capture(cot="", raw_output=raw_output)
+        assert raw_output in user_input, (
+            "When reasoning.cot is empty, reasoning.raw_output must be used in CSR prompt"
         )
