@@ -23,23 +23,14 @@ jobs:
       - name: Install dependencies
         run: pip install pyflakes pytest
 
-      - name: Syntax check engine.py
-        run: python -m py_compile engine.py && echo "✅ engine.py syntax OK"
-
-      - name: Syntax check colab_runner.py
-        run: python -m py_compile colab_runner.py && echo "✅ colab_runner.py syntax OK"
-
-      - name: Syntax check rmoe package
+      - name: Syntax check all Python files
         run: |
-          for f in rmoe/*.py; do
+          find . -name "*.py" -not -path "./.git/*" -print0 | while IFS= read -r -d '' f; do
             python -m py_compile "$f" && echo "✅ $f"
           done
 
-      - name: Pyflakes engine.py
-        run: python -m pyflakes engine.py
-
-      - name: Pyflakes rmoe package
-        run: python -m pyflakes rmoe/
+      - name: Pyflakes all Python files
+        run: find . -name "*.py" -not -path "./.git/*" -print0 | xargs -0 python -m pyflakes
 
       - name: Run unit tests (119 tests, no GPU/model files needed)
         run: python -m pytest tests/ -v --tb=short 2>&1

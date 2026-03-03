@@ -127,7 +127,7 @@ def _parse_arll_output(raw: str) -> ReasoningOutput:
     blob = _extract_json_block(raw)
 
     if blob:
-        out.cot = blob.get("cot", raw[:300])
+        out.cot = blob.get("cot", raw)
         hyps = [
             DDxHypothesis(
                 diagnosis=str(item.get("diagnosis", "")),
@@ -147,7 +147,7 @@ def _parse_arll_output(raw: str) -> ReasoningOutput:
         return out
 
     # Regex fallback
-    out.cot = raw[:500]
+    out.cot = raw
     pairs = re.findall(
         r"([A-Za-z][A-Za-z ]{3,40})[:\-–]?\s*([0-9]+(?:\.[0-9]+)?)\s*%?", raw
     )
@@ -303,7 +303,6 @@ class ExpertSwapper:
                 n_ctx=self._params.n_ctx,
                 n_threads=self._params.n_threads,
                 n_threads_batch=self._params.n_threads_batch,
-                logits_all=True,
                 verbose=False,
             )
             print(f"  [swap] vision load OK: {model_path}", file=sys.stderr)
@@ -452,6 +451,7 @@ class VisionExpert:
         prior_image: Optional[str] = None,
         doctor_feedback: Optional[DoctorFeedback] = None,
         prompt_dir: str = "prompts",
+        wanna_feedback: str = "",
     ) -> PerceptionEvidence:
         system_prompt = _load_prompt(
             os.path.join(prompt_dir, "mpe_system_prompt.txt"),
@@ -476,30 +476,35 @@ class VisionExpert:
             user_text += f"\n\nDOCTOR CONTEXT: {doctor_feedback.message}"
 
         # Inject #wanna# feedback from previous iteration
-        if "|" in input_data and "High-Res Crop" in input_data:
-            user_text += f"\n\n#wanna# FEEDBACK: {input_data}. Apply 2.5× zoom to the specified region."
-        elif "|" in input_data and "Alternate View" in input_data:
-            user_text += f"\n\n#wanna# FEEDBACK: {input_data}. Analyse the requested imaging angle."
+        if wanna_feedback:
+            if "High-Res Crop" in wanna_feedback:
+                user_text += f"\n\n#wanna# FEEDBACK: {wanna_feedback}. Apply 2.5× zoom to the specified region."
+            elif "Alternate View" in wanna_feedback:
+                user_text += f"\n\n#wanna# FEEDBACK: {wanna_feedback}. Analyse the requested imaging angle."
 
         if prior_image:
             user_text += f"\n\nPRIOR SCAN PATH: {prior_image}. Note any interval changes."
 
+        # Resolve the actual image path: input_data on iter 1; on later iterations
+        # input_data may be a wanna-feedback string, so fall back to input_data only
+        # when it still looks like a real image file.
+        ext = os.path.splitext(input_data)[1][1:].lower()
+        is_image = ext in ("png", "jpg", "jpeg", "bmp", "gif", "webp")
+        image_file = input_data if (is_image and os.path.exists(input_data)) else ""
+
         if not _HAS_LLAMA_CPP:
             from rmoe.mock import get_mpe_output
-            raw = get_mpe_output(self._iteration, input_data)
+            raw = get_mpe_output(self._iteration, wanna_feedback or input_data)
+        elif self._swapper.has_vision() and image_file:
+            raw = self._swapper.infer_with_image(
+                system_prompt, image_file, user_text, max_new_tokens=512
+            )
         elif self._swapper.has_vision():
-            ext  = os.path.splitext(input_data)[1][1:].lower()
-            is_image = ext in ("png", "jpg", "jpeg", "bmp", "gif", "webp")
-            if is_image and os.path.exists(input_data):
-                raw = self._swapper.infer_with_image(
-                    system_prompt, input_data, user_text, max_new_tokens=512
-                )
-            else:
-                raw = self._swapper.infer_text(
-                    system_prompt,
-                    f"Context (iter {self._iteration}):\n{input_data}\n\n{user_text}",
-                    max_new_tokens=512,
-                )
+            raw = self._swapper.infer_text(
+                system_prompt,
+                f"Context (iter {self._iteration}):\n{wanna_feedback or input_data}\n\n{user_text}",
+                max_new_tokens=512,
+            )
         else:
             raw = self._swapper.infer_text(
                 system_prompt, f"Image: {input_data}\n{user_text}",
@@ -512,14 +517,18 @@ class VisionExpert:
 def _parse_mpe_evidence(raw: str) -> PerceptionEvidence:
     blob = _extract_json_block(raw)
     if blob:
+        # Fall back to full raw text when the JSON block has no feature_summary,
+        # so the downstream reasoning expert always receives the vision model's
+        # full description rather than an empty string.
+        feature_summary = blob.get("feature_summary") or raw
         return PerceptionEvidence(
             rois=blob.get("rois", []),
-            feature_summary=blob.get("feature_summary", ""),
+            feature_summary=feature_summary,
             confidence_level=blob.get("confidence_level", "medium"),
             saliency_crop=blob.get("saliency_crop", ""),
             raw_summary=raw,
         )
-    return PerceptionEvidence(raw_summary=raw, feature_summary=raw[:300])
+    return PerceptionEvidence(raw_summary=raw, feature_summary=raw)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -611,7 +620,7 @@ class ReportingExpert:
             "You are CSR. Generate a structured ICD-11 JSON clinical report.",
         )
         user_input = (
-            f"Validated ARLL reasoning:\n{reasoning.cot}\n\n"
+            f"Validated ARLL reasoning:\n{reasoning.cot or reasoning.raw_output}\n\n"
             f"DDx ensemble:\n{json.dumps(reasoning.ensemble.to_dict(), indent=2)}\n\n"
             f"Final Sc = {reasoning.ensemble.sc:.4f}, "
             f"σ² = {reasoning.ensemble.sigma2:.6f}, "
